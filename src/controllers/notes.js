@@ -112,6 +112,16 @@ async function unshareNote(req, res) {
     res.status(500).json({ error: 'Could not remove share.' });
   }
 }
+async function deleteNote(req, res) {
+  try {
+    const deleted = await notes.deleteNote(req.user.email, req.params.noteId);
+    if (!deleted) return res.status(404).json({ error: 'Note not found or unauthorized.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('deleteNote failed:', err.message);
+    res.status(500).json({ error: 'Could not delete note.' });
+  }
+}
 
 module.exports = {
   createNote,
@@ -124,4 +134,5 @@ module.exports = {
   referenceNoteFromEntry,
   shareNote,
   unshareNote,
+  deleteNote,
 };

@@ -15,5 +15,6 @@ router.post('/:noteId/link', requireAuth, notesController.linkNotes);
 router.post('/:noteId/reference-from-entry', requireAuth, notesController.referenceNoteFromEntry);
 router.post('/:noteId/share', requireAuth, notesController.shareNote);
 router.delete('/:noteId/share', requireAuth, notesController.unshareNote);
+router.delete('/:noteId', requireAuth, notesController.deleteNote);
 
 module.exports = router;

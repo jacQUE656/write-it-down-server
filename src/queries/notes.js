@@ -261,8 +261,25 @@ async function relatedNotes(userEmail, noteId) {
   }));
 }
 
+/** Deletes a note owned by the user, removing all its relationships. */
+async function deleteNote(userEmail, noteId) {
+  const parsedId = parseInt(noteId, 10);
+  if (isNaN(parsedId)) return false;
+
+  const cypher = `
+    MATCH (u:User {email: $userEmail})-[:OWNS]->(n:Note)
+    WHERE id(n) = $noteId
+    DETACH DELETE n
+    RETURN count(n) AS deletedCount
+  `;
+  const records = await runQuery(cypher, { userEmail, noteId: parsedId });
+  if (!records[0]) return false;
+  const count = unwrapId(records[0].deletedCount);
+  return parseInt(count, 10) > 0;
+}
+
 module.exports = {
   createNote, listNotes, getNoteDetail, updateNote,
   linkNotes, referenceNoteFromEntry, relatedNotes,
-  shareNote, unshareNote, listNotesSharedWithMe,
+  shareNote, unshareNote, listNotesSharedWithMe, deleteNote
 };
