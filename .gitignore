@@ -1,0 +1,65 @@
+node_modules
+.env
+
+// index.js
+// Main Express app. Verifies the CognoDB connection at startup so the app
+// fails with a clear message instead of crashing on the first query, and
+// keeps a health-check route for the same reason at runtime.
+
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const { verifyConnection } = require('./db');
+
+const authRoutes = require('./routes/auth');
+const entryRoutes = require('./routes/entries');
+const todoRoutes = require('./routes/todos');
+const noteRoutes = require('./routes/notes');
+const graphRoutes = require('./routes/graph');
+const searchRoutes = require('./routes/search');
+
+const app = express();
+const PORT = process.env.PORT || 4000;
+
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173', credentials: true }));
+app.use(express.json());
+app.use(cookieParser());
+
+app.get('/health', async (req, res) => {
+  try {
+    await verifyConnection();
+    res.json({ status: 'ok', database: 'connected' });
+  } catch (err) {
+    res.status(503).json({ status: 'error', database: 'unreachable', message: err.message });
+  }
+});
+
+app.use('/auth', authRoutes);
+app.use('/entries', entryRoutes);
+app.use('/todos', todoRoutes);
+app.use('/notes', noteRoutes);
+app.use('/graph', graphRoutes);
+app.use('/search', searchRoutes);
+
+// Catch-all error handler so a database hiccup returns a clean JSON error
+// instead of crashing the process or leaking a stack trace to the client.
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Something went wrong. Please try again.' });
+});
+
+async function start() {
+  try {
+    await verifyConnection();
+    console.log('Connected to CognoDB.');
+  } catch (err) {
+    console.error('Could not connect to CognoDB at startup:', err.message);
+    console.error('Check COGNODB_URI, COGNODB_USER, and COGNODB_PASSWORD in your .env file.');
+    // Start anyway so /health reports the problem clearly, rather than
+    // crash-looping — useful while a hosted instance is still provisioning.
+  }
+  app.listen(PORT, () => console.log(`Loom server running on http://localhost:${PORT}`));
+}
+
+start();

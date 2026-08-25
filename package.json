@@ -1,0 +1,31 @@
+{
+  "name": "write-it-down-server",
+  "version": "1.0.0",
+  "description": "Backend for write-it-down - a graph-backed daily reflection notepad",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "google-auth-library": "^11.0.2",
+    "jsonwebtoken": "^9.0.3",
+    "neo4j-driver": "^6.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  },
+  "allowScripts": {
+    "bcrypt@6.0.0": true
+  }
+}
