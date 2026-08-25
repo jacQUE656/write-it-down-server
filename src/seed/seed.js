@@ -89,7 +89,7 @@ async function seed() {
 
   // Standalone long-form notes (class notes, project notes) — owned directly
   // by the user, wiki-linked to each other, and referenced from an entry.
-  const noteRecords = await runQuery(
+const noteRecords = await runQuery(
     `
     MATCH (u:User {email: $email})
     CREATE (n1:Note {
@@ -108,7 +108,7 @@ async function seed() {
     MERGE (th:Theme {name: 'work'})
     CREATE (n1)-[:TAGGED]->(th)
     CREATE (n2)-[:TAGGED]->(th)
-    WITH u
+    WITH u, n1  // <-- PASS n1 ALONG WITH u HERE
     MATCH (u)-[:OWNS]->(e:Entry {date: '2026-08-12'})
     MATCH (u)-[:OWNS]->(n2:Note {title: 'Project X — Meeting Notes, Aug 12'})
     CREATE (e)-[:REFERENCES]->(n2)
