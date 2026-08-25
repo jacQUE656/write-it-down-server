@@ -36,23 +36,34 @@ async function listNotes(userEmail) {
  * who isn't the owner does not (kept private to the owner).
  */
 async function getNoteDetail(userEmail, noteId) {
+  const parsedId = parseInt(noteId, 10);
+  if (isNaN(parsedId)) return null;
+
   const cypher = `
     MATCH (n:Note) WHERE id(n) = $noteId
     MATCH (owner:User)-[:OWNS]->(n)
-    WHERE owner.email = $userEmail
-       OR EXISTS { (n)-[:SHARED_WITH]->(:User {email: $userEmail}) }
+    OPTIONAL MATCH (n)-[:SHARED_WITH]->(viewer:User {email: $userEmail})
+    WITH n, owner, viewer
+    WHERE owner.email = $userEmail OR viewer IS NOT NULL
+
     OPTIONAL MATCH (n)-[:TAGGED]->(th:Theme)
+    WITH n, owner, collect(DISTINCT th.name) AS themes
+
     OPTIONAL MATCH (n)-[:LINKS_TO]->(out:Note)
+    WITH n, owner, themes, collect(DISTINCT {id: id(out), title: out.title}) AS linksOut
+
     OPTIONAL MATCH (n)<-[:LINKS_TO]-(in:Note)
+    WITH n, owner, themes, linksOut, collect(DISTINCT {id: id(in), title: in.title}) AS linkedFrom
+
     OPTIONAL MATCH (n)-[:SHARED_WITH]->(sw:User)
     RETURN n, owner.email AS ownerEmail, owner.name AS ownerName,
-           collect(DISTINCT th.name) AS themes,
-           collect(DISTINCT {id: id(out), title: out.title}) AS linksOut,
-           collect(DISTINCT {id: id(in), title: in.title}) AS linkedFrom,
+           themes, linksOut, linkedFrom,
            collect(DISTINCT {email: sw.email, name: sw.name}) AS sharedWith
   `;
-  const records = await runQuery(cypher, { userEmail, noteId: parseInt(noteId, 10) });
-  if (records.length === 0) return null;
+
+  const records = await runQuery(cypher, { userEmail, noteId: parsedId });
+  if (!records || records.length === 0) return null;
+
   const r = records[0];
   const isOwner = r.ownerEmail === userEmail;
   return {
@@ -67,12 +78,16 @@ async function getNoteDetail(userEmail, noteId) {
 }
 
 /**
- * Shares a note with another user by email. The recipient must already
- * have an account — sharing just creates a SHARED_WITH edge from the note
- * straight to their User node, so "who can see this" is itself part of
- * the graph rather than a separate permissions table.
+ * Shares a note with another user by email.
  */
 async function shareNote(ownerEmail, noteId, recipientEmail) {
+  const parsedId = parseInt(noteId, 10);
+  if (isNaN(parsedId)) {
+    const err = new Error('Invalid note ID.');
+    err.status = 400;
+    throw err;
+  }
+
   if (recipientEmail === ownerEmail) {
     const err = new Error('You already have this note — no need to share it with yourself.');
     err.status = 400;
@@ -91,7 +106,7 @@ async function shareNote(ownerEmail, noteId, recipientEmail) {
 
   const ownerCheck = await runQuery(
     `MATCH (owner:User {email: $ownerEmail})-[:OWNS]->(n:Note) WHERE id(n) = $noteId RETURN n`,
-    { ownerEmail, noteId: parseInt(noteId, 10) }
+    { ownerEmail, noteId: parsedId }
   );
   if (ownerCheck.length === 0) {
     const err = new Error('Note not found.');
@@ -105,20 +120,23 @@ async function shareNote(ownerEmail, noteId, recipientEmail) {
     MATCH (recipient:User {email: $recipientEmail})
     MERGE (n)-[:SHARED_WITH]->(recipient)
     `,
-    { noteId: parseInt(noteId, 10), recipientEmail }
+    { noteId: parsedId, recipientEmail }
   );
   return { email: recipientEmail };
 }
 
 /** Revokes a note share. */
 async function unshareNote(ownerEmail, noteId, recipientEmail) {
+  const parsedId = parseInt(noteId, 10);
+  if (isNaN(parsedId)) return;
+
   const cypher = `
     MATCH (owner:User {email: $ownerEmail})-[:OWNS]->(n:Note)
     WHERE id(n) = $noteId
     MATCH (n)-[r:SHARED_WITH]->(:User {email: $recipientEmail})
     DELETE r
   `;
-  await runQuery(cypher, { ownerEmail, noteId: parseInt(noteId, 10), recipientEmail });
+  await runQuery(cypher, { ownerEmail, noteId: parsedId, recipientEmail });
 }
 
 /** Notes someone else has shared with this user. */
@@ -133,8 +151,11 @@ async function listNotesSharedWithMe(userEmail) {
   return runQuery(cypher, { userEmail });
 }
 
-/** Updates a note's title/body (e.g. ongoing class or project notes). */
+/** Updates a note's title/body. */
 async function updateNote(userEmail, noteId, { title, body }) {
+  const parsedId = parseInt(noteId, 10);
+  if (isNaN(parsedId)) return null;
+
   const cypher = `
     MATCH (u:User {email: $userEmail})-[:OWNS]->(n:Note)
     WHERE id(n) = $noteId
@@ -144,13 +165,17 @@ async function updateNote(userEmail, noteId, { title, body }) {
     RETURN n
   `;
   const records = await runQuery(cypher, {
-    userEmail, noteId: parseInt(noteId, 10), title: title ?? null, body: body ?? null,
+    userEmail, noteId: parsedId, title: title ?? null, body: body ?? null,
   });
   return records[0]?.n.properties;
 }
 
 /** Wiki-style link between two of a user's own notes. */
 async function linkNotes(userEmail, fromNoteId, toNoteId) {
+  const parsedFromId = parseInt(fromNoteId, 10);
+  const parsedToId = parseInt(toNoteId, 10);
+  if (isNaN(parsedFromId) || isNaN(parsedToId)) return null;
+
   const cypher = `
     MATCH (u:User {email: $userEmail})-[:OWNS]->(a:Note)
     WHERE id(a) = $fromNoteId
@@ -160,12 +185,15 @@ async function linkNotes(userEmail, fromNoteId, toNoteId) {
     RETURN a, b
   `;
   return runQuery(cypher, {
-    userEmail, fromNoteId: parseInt(fromNoteId, 10), toNoteId: parseInt(toNoteId, 10),
+    userEmail, fromNoteId: parsedFromId, toNoteId: parsedToId,
   });
 }
 
-/** Points a daily entry at a longer standalone note (e.g. "worked on Project X" → Project X notes). */
+/** Points a daily entry at a longer standalone note. */
 async function referenceNoteFromEntry(userEmail, entryDate, noteId) {
+  const parsedId = parseInt(noteId, 10);
+  if (isNaN(parsedId)) return null;
+
   const cypher = `
     MATCH (u:User {email: $userEmail})-[:OWNS]->(e:Entry {date: $entryDate})
     MATCH (u)-[:OWNS]->(n:Note)
@@ -173,14 +201,14 @@ async function referenceNoteFromEntry(userEmail, entryDate, noteId) {
     MERGE (e)-[:REFERENCES]->(n)
     RETURN e, n
   `;
-  return runQuery(cypher, { userEmail, entryDate, noteId: parseInt(noteId, 10) });
+  return runQuery(cypher, { userEmail, entryDate, noteId: parsedId });
 }
 
-/**
- * Multi-hop: notes related to a given note, even indirectly — via a shared
- * theme, OR reachable within 2 hops through the LINKS_TO web.
- */
+/** Multi-hop: notes related to a given note. */
 async function relatedNotes(userEmail, noteId) {
+  const parsedId = parseInt(noteId, 10);
+  if (isNaN(parsedId)) return [];
+
   const cypher = `
     MATCH (u:User {email: $userEmail})-[:OWNS]->(n:Note)
     WHERE id(n) = $noteId
@@ -194,7 +222,7 @@ async function relatedNotes(userEmail, noteId) {
     WHERE r IS NOT NULL
     RETURN r.title AS title, id(r) AS noteId
   `;
-  return runQuery(cypher, { userEmail, noteId: parseInt(noteId, 10) });
+  return runQuery(cypher, { userEmail, noteId: parsedId });
 }
 
 module.exports = {
