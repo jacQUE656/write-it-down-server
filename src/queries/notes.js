@@ -1,5 +1,17 @@
 const { runQuery } = require('../db');
 
+/** Helper to unpack Neo4j integer objects ({ low: X, high: Y }) into primitive strings or numbers */
+function unwrapId(val) {
+  if (val === null || val === undefined) return val;
+  if (typeof val === 'object' && typeof val.low === 'number') {
+    return val.low.toString();
+  }
+  if (typeof val === 'number') {
+    return val.toString();
+  }
+  return val;
+}
+
 /** Creates a new standalone note, optionally tagged with themes. */
 async function createNote({ userEmail, title, body, themes = [] }) {
   const cypher = `
@@ -16,7 +28,10 @@ async function createNote({ userEmail, title, body, themes = [] }) {
   `;
   const records = await runQuery(cypher, { userEmail, title, body, themes });
   if (!records[0]) return null;
-  return { ...records[0].n.properties, noteId: records[0].noteId };
+  return { 
+    ...records[0].n.properties, 
+    noteId: unwrapId(records[0].noteId) 
+  };
 }
 
 /** Lists all of a user's notes (title + preview only, not the full body). */
@@ -27,13 +42,16 @@ async function listNotes(userEmail) {
            id(n) AS noteId
     ORDER BY n.updatedAt DESC
   `;
-  return runQuery(cypher, { userEmail });
+  const records = await runQuery(cypher, { userEmail });
+  return records.map((r) => ({
+    ...r,
+    noteId: unwrapId(r.noteId),
+  }));
 }
 
 /**
  * Gets one note in full. Accessible to the owner, or to anyone the note
- * has been shared with — the owner sees who it's shared with; a viewer
- * who isn't the owner does not (kept private to the owner).
+ * has been shared with.
  */
 async function getNoteDetail(userEmail, noteId) {
   const parsedId = parseInt(noteId, 10);
@@ -66,20 +84,26 @@ async function getNoteDetail(userEmail, noteId) {
 
   const r = records[0];
   const isOwner = r.ownerEmail === userEmail;
+
   return {
-    note: r.n.properties,
+    note: {
+      ...r.n.properties,
+      noteId: unwrapId(noteId),
+    },
     isOwner,
     owner: isOwner ? null : { email: r.ownerEmail, name: r.ownerName },
     themes: r.themes.filter(Boolean),
-    linksOut: r.linksOut.filter((l) => l.id !== null),
-    linkedFrom: r.linkedFrom.filter((l) => l.id !== null),
+    linksOut: r.linksOut
+      .filter((l) => l.id !== null)
+      .map((l) => ({ ...l, id: unwrapId(l.id) })),
+    linkedFrom: r.linkedFrom
+      .filter((l) => l.id !== null)
+      .map((l) => ({ ...l, id: unwrapId(l.id) })),
     sharedWith: isOwner ? r.sharedWith.filter((s) => s.email !== null) : [],
   };
 }
 
-/**
- * Shares a note with another user by email.
- */
+/** Shares a note with another user by email. */
 async function shareNote(ownerEmail, noteId, recipientEmail) {
   const parsedId = parseInt(noteId, 10);
   if (isNaN(parsedId)) {
@@ -148,7 +172,11 @@ async function listNotesSharedWithMe(userEmail) {
            id(n) AS noteId, owner.name AS ownerName, owner.email AS ownerEmail
     ORDER BY n.updatedAt DESC
   `;
-  return runQuery(cypher, { userEmail });
+  const records = await runQuery(cypher, { userEmail });
+  return records.map((r) => ({
+    ...r,
+    noteId: unwrapId(r.noteId),
+  }));
 }
 
 /** Updates a note's title/body. */
@@ -162,12 +190,16 @@ async function updateNote(userEmail, noteId, { title, body }) {
     SET n.title = coalesce($title, n.title),
         n.body = coalesce($body, n.body),
         n.updatedAt = datetime()
-    RETURN n
+    RETURN n, id(n) AS noteId
   `;
   const records = await runQuery(cypher, {
     userEmail, noteId: parsedId, title: title ?? null, body: body ?? null,
   });
-  return records[0]?.n.properties;
+  if (!records[0]) return null;
+  return {
+    ...records[0].n.properties,
+    noteId: unwrapId(records[0].noteId || parsedId),
+  };
 }
 
 /** Wiki-style link between two of a user's own notes. */
@@ -222,7 +254,11 @@ async function relatedNotes(userEmail, noteId) {
     WHERE r IS NOT NULL
     RETURN r.title AS title, id(r) AS noteId
   `;
-  return runQuery(cypher, { userEmail, noteId: parsedId });
+  const records = await runQuery(cypher, { userEmail, noteId: parsedId });
+  return records.map((r) => ({
+    ...r,
+    noteId: unwrapId(r.noteId),
+  }));
 }
 
 module.exports = {
